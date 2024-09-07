@@ -5,11 +5,11 @@ pipeline {
 
 	}
     stages{
-        // stage('Fetch code') {
-        //   steps{
-        //       git branch: 'master', url: 'https://github.com/Arlette-Yolande/jenkins-webhook-demo.git'
-        //   }  
-        // }
+        stage('Fetch code') {
+          steps{
+              git branch: 'master', url: 'https://github.com/Arlette-Yolande/jenkins-webhook-demo.git'
+          }  
+        }
 
         stage('Build') {
             steps {
