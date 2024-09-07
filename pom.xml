@@ -11,6 +11,7 @@
 	<parent>
 		<!-- Demo test with github webhooks -->
 		<!-- Demo test-01 with github webhooks -->
+		<!-- Demo test-02 with github webhooks -->
 		
 		<groupId>org.springframework.boot</groupId>
 		<artifactId>spring-boot-starter-parent</artifactId>
