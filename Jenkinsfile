@@ -1,115 +1,87 @@
 pipeline {
     agent any
+    tools {
+	    maven "maven"
 
-    environment {
-        // You must set the following environment variables
-        SCANNER_HOME = tool 'sonar-scanner'
-        AWS_ACCOUNT_ID = credentials('ACCOUNT_ID')
-        AWS_ECR_REPO_NAME = credentials('ECR_REPO_POSITION_TRACKER')
-        AWS_DEFAULT_REGION = 'us-east-1'
-        ORGANIZATION_NAME = "fleetman-k8s-ci"
-        SERVICE_NAME = "fleetman-position-tracker"
-            
-        REPOSITORY_TAG = "${ORGANIZATION_NAME}-${SERVICE_NAME}:${BUILD_ID}"
-        REPOSITORY_URI = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/"
-    }
-
-    stages {
-      stage('Preparation') {
-         steps {
-            cleanWs()
-         }
-      }
-      stage('Checkout from Git') {
-            steps {
-                git credentialsId: 'GitHub', url: "https://github.com/${ORGANIZATION_NAME}/${SERVICE_NAME}"
-            }
-      }
-
-      stage('Build') {
-         steps {
-            sh '''mvn clean package'''
-         }
-      }
-
-        stage('Sonarqube Analysis') {
-            steps {
-				withSonarQubeEnv('sonar-server') {
-					sh '''
-					mvn clean verify sonar:sonar \
-					-Dsonar.projectKey=fleetman-position-tracker '''
-				}
-                
-            }
+	}
+    stages{
+        stage('Fetch code') {
+          steps{
+              git branch: 'master', url: 'https://github.com/bbw3luv/fleetman-position-tracker.git'
+          }  
         }
 
-        stage('Quality Check') {
+        stage('Build') {
             steps {
-                script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token' 
+                sh 'mvn clean install -DskipTests'
+            }
+            post {
+                success {
+                    echo "Now Archiving."
+                    archiveArtifacts artifacts: '**/*.jar'
                 }
             }
         }
-
-        stage('Trivy File Scan') {
+        stage('Test'){
             steps {
-                sh 'trivy fs . > trivyfs.txt'
+                sh 'mvn test'
+            }
+
+        }
+
+        stage('Checkstyle Analysis'){
+            steps {
+                sh 'mvn checkstyle:checkstyle'
             }
         }
 
-        stage("Docker Image Build") {
-            steps {
-                script {
-                    sh 'docker system prune -f'
-                    sh 'docker container prune -f'
-                    sh 'docker build -t ${AWS_ECR_REPO_NAME} .'
-                }
-            }
-        }
-
-        stage("ECR Image Pushing") {
-            steps {
-                script {
-                        sh 'aws ecr get-login-password --region ${AWS_DEFAULT_REGION} | docker login --username AWS --password-stdin ${REPOSITORY_URI}'
-                        sh 'docker tag ${AWS_ECR_REPO_NAME} ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}'
-                        sh 'docker push ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}'
-                }
-            }
-        }
-
-        stage("TRIVY Image Scan") {
-            steps {
-                sh 'trivy image ${REPOSITORY_URI}${AWS_ECR_REPO_NAME}:${BUILD_NUMBER} > trivyimage.txt'
-            }
-        }
-
-        stage('Checkout Code') {
-            steps {
-                git credentialsId: 'GitHub', url: "https://github.com/${ORGANIZATION_NAME}/${SERVICE_NAME}"
-            }
-        }
-
-        stage('Update Deployment file') {
+        stage('Sonar Analysis') {
             environment {
-                GIT_REPO_NAME = "fleetman-position-tracker"
-                GIT_ORG_NAME = "fleetman-k8s-ci"
+                scannerHome = tool 'sonar4.7'
             }
             steps {
-                withCredentials([string(credentialsId: 'github', variable: 'GITHUB_TOKEN')]) {
-                    sh '''
-                        git config user.email "deepaktyagi048@gmail.com"
-                        git config user.name "deeepak-tyagii"
-                        BUILD_NUMBER=${BUILD_NUMBER}
-                        echo $BUILD_NUMBER
-                        imageTag=$(grep -oP '(?<=fleetman-position-tracker:)[^ ]+' deploy.yaml)
-                        echo $imageTag
-                        sed -i "s/${AWS_ECR_REPO_NAME}:${imageTag}/${AWS_ECR_REPO_NAME}:${BUILD_NUMBER}/" deploy.yaml
-                        git add deploy.yaml
-                        git commit -m "Update deployment Image to version \${BUILD_NUMBER}"
-                        git push https://${GITHUB_TOKEN}@github.com/${GIT_ORG_NAME}/${GIT_REPO_NAME} HEAD:master
-                    '''
+               withSonarQubeEnv('sonar') {
+                   sh '''${scannerHome}/bin/sonar-scanner -X -Dsonar.projectKey=deployapp \
+                   -Dsonar.projectName=deployapp \
+                   -Dsonar.projectVersion=1.0 \
+                   -Dsonar.sources=src/ \
+                   -Dsonar.java.binaries=target/* '''
+              }
+            }
+        }
+        stage("Quality Gate") {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    // Parameter indicates whether to set pipeline to UNSTABLE if Quality Gate fails
+                    // true = set pipeline to UNSTABLE, false = don't
+                    waitForQualityGate abortPipeline: true
                 }
             }
         }
+        
+        stage("UploadArtifact"){
+            steps{
+                nexusArtifactUploader(
+                  nexusVersion: 'nexus3',
+                  protocol: 'http',
+                  nexusUrl: '13.91.222.198:8081',
+                  groupId: 'QA',
+                  version: "${env.BUILD_ID}-${env.BUILD_TIMESTAMP}",
+                  repository: 'deployapp',
+                  credentialsId: 'NexusLogin',
+                  artifacts: [
+                    [artifactId: 'deployapp',
+                     classifier: '',
+                     file: 'target/positionreceiver-0.0.1-SNAPSHOT.jar',
+                     type: 'jar']
+    ]
+ )
+            }
+        }
+
+
+
     }
-}
+
+
+    }
