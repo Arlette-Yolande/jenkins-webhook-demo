@@ -7,7 +7,7 @@ pipeline {
     stages{
         stage('Fetch code') {
           steps{
-              git branch: 'master', url: 'https://github.com/bbw3luv/fleetman-position-tracker.git'
+              git branch: 'master', url: 'https://github.com/Arlette-Yolande/fleetman-position-tracker.git'
           }  
         }
 
